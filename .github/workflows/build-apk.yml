@@ -34,18 +34,24 @@ jobs:
       - name: Generate code
         run: dart run build_runner build --delete-conflicting-outputs
 
-      - name: Create dummy keystore
+      - name: Setup signing
         run: |
-          keytool -genkey -v -keystore ${{ github.workspace }}/android/app/upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload -storepass android -keypass android -dname "CN=Debug, OU=Debug, O=Debug, L=Debug, S=Debug, C=US"
-          cat > ${{ github.workspace }}/android/key.properties << EOF
-          storePassword=android
-          keyPassword=android
-          keyAlias=upload
-          storeFile=${{ github.workspace }}/android/app/upload-keystore.jks
-          EOF
+          KEYSTORE_PATH="${{ github.workspace }}/android/app/upload-keystore.jks"
+          keytool -genkey -v -keystore "$KEYSTORE_PATH" -keyalg RSA -keysize 2048 -validity 10000 -alias upload -storepass android -keypass android -dname "CN=Debug, OU=Debug, O=Debug, L=Debug, S=Debug, C=US"
+          printf 'storePassword=android\nkeyPassword=android\nkeyAlias=upload\nstoreFile=%s\n' "$KEYSTORE_PATH" > ${{ github.workspace }}/android/key.properties
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ github.workspace }}/android/app/upload-keystore.jks
+          ANDROID_KEYSTORE_PASSWORD: android
+          ANDROID_KEY_ALIAS: upload
+          ANDROID_KEY_PASSWORD: android
 
       - name: Build APK
         run: flutter build apk --release
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ github.workspace }}/android/app/upload-keystore.jks
+          ANDROID_KEYSTORE_PASSWORD: android
+          ANDROID_KEY_ALIAS: upload
+          ANDROID_KEY_PASSWORD: android
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
