@@ -8,7 +8,7 @@ import 'package:spotube/models/smart_playlist/smart_playlist_config.dart';
 import 'package:spotube/provider/audio_player/audio_player.dart';
 import 'package:spotube/provider/database/database.dart';
 import 'package:spotube/provider/metadata_plugin/metadata_plugin_provider.dart';
-import 'package:spotube/provider/metadata_plugin/utils/common.dart';
+import 'package:spotube/provider/metadata_plugin/metadata_plugin_provider.dart';
 import 'package:spotube/services/logger/logger.dart';
 
 class SmartPlaylistState {
@@ -101,7 +101,7 @@ class SmartPlaylistNotifier extends Notifier<SmartPlaylistState> {
     int limit = 50,
   }) async {
     try {
-      final plugin = await metadataPlugin;
+      final plugin = await ref.read(metadataPluginProvider.future);     
       final result = await plugin.search.tracks(
         genreName,
         offset: 0,
