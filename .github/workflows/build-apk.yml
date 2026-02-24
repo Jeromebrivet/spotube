@@ -37,10 +37,12 @@ jobs:
       - name: Create dummy keystore
         run: |
           keytool -genkey -v -keystore ${{ github.workspace }}/android/app/upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload -storepass android -keypass android -dname "CN=Debug, OU=Debug, O=Debug, L=Debug, S=Debug, C=US"
-          echo "ANDROID_KEYSTORE_FILE=${{ github.workspace }}/android/app/upload-keystore.jks" >> $GITHUB_ENV
-          echo "ANDROID_KEYSTORE_PASSWORD=android" >> $GITHUB_ENV
-          echo "ANDROID_KEY_ALIAS=upload" >> $GITHUB_ENV
-          echo "ANDROID_KEY_PASSWORD=android" >> $GITHUB_ENV
+          cat > ${{ github.workspace }}/android/key.properties << EOF
+          storePassword=android
+          keyPassword=android
+          keyAlias=upload
+          storeFile=${{ github.workspace }}/android/app/upload-keystore.jks
+          EOF
 
       - name: Build APK
         run: flutter build apk --release
