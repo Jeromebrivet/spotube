@@ -27,9 +27,11 @@ jobs:
         with:
           channel: 'stable'
           cache: true
-
+          
       - name: Install dependencies
-        run: flutter pub get
+        run: |
+          flutter pub upgrade --major-versions
+          flutter pub get
 
       - name: Generate code
         run: dart run build_runner build --delete-conflicting-outputs
