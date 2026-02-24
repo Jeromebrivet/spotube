@@ -107,7 +107,7 @@ class SmartPlaylistNotifier extends Notifier<SmartPlaylistState> {
         offset: 0,
         limit: limit,
       );
-      return result.items.whereType<SpotubeFullTrackObject>().toList();
+      return result?.items.whereType<SpotubeFullTrackObject>().toList() ?? [];
     } catch (e) {
       AppLogger.reportError(e, StackTrace.current);
       return [];
