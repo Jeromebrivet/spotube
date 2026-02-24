@@ -102,7 +102,7 @@ class SmartPlaylistNotifier extends Notifier<SmartPlaylistState> {
   }) async {
     try {
       final plugin = await ref.read(metadataPluginProvider.future);     
-      final result = await plugin.search.tracks(
+      final result = await plugin?.search.tracks(
         genreName,
         offset: 0,
         limit: limit,
