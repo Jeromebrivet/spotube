@@ -39,11 +39,11 @@ jobs:
         run: dart run build_runner build --delete-conflicting-outputs
 
       - name: Build APK
-        run: flutter build apk --release
+        run: flutter build apk --debug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: spotube-smart-playlist-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
           retention-days: 30
