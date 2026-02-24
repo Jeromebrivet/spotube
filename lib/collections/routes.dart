@@ -84,6 +84,10 @@ class AppRouter extends RootStackRouter {
               page: LyricsRoute.page,
             ),
             AutoRoute(
+              path: "smart-playlist",
+              page: SmartPlaylistRoute.page,
+            ),
+            AutoRoute(
               path: "settings",
               page: SettingsRoute.page,
             ),
