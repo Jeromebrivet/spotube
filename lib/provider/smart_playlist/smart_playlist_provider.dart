@@ -4,16 +4,13 @@ import 'package:drift/drift.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:spotube/models/database/database.dart';
 import 'package:spotube/models/metadata/metadata.dart';
+import 'package:spotube/models/smart_playlist/smart_playlist_config.dart';
 import 'package:spotube/provider/audio_player/audio_player.dart';
 import 'package:spotube/provider/database/database.dart';
-import 'package:spotube/provider/history/history.dart';
 import 'package:spotube/provider/metadata_plugin/metadata_plugin_provider.dart';
 import 'package:spotube/provider/metadata_plugin/utils/common.dart';
 import 'package:spotube/services/logger/logger.dart';
 
-import 'package:spotube/models/smart_playlist/smart_playlist_config.dart';
-
-/// State for the Smart Playlist generator
 class SmartPlaylistState {
   final SmartPlaylistConfig config;
   final List<SpotubeFullTrackObject> generatedTracks;
@@ -53,16 +50,13 @@ class SmartPlaylistState {
     );
   }
 
-  /// Human-readable actual duration
   String get durationDisplay {
     final h = actualDuration.inHours;
     final m = actualDuration.inMinutes % 60;
-    final s = actualDuration.inSeconds % 60;
     if (h > 0) return '${h}h${m.toString().padLeft(2, '0')}m';
-    return '${m}m${s.toString().padLeft(2, '0')}s';
+    return '${m}min';
   }
 
-  /// How close we are to the target duration
   double get durationAccuracy {
     if (config.totalDuration.inMilliseconds == 0) return 0;
     return actualDuration.inMilliseconds / config.totalDuration.inMilliseconds;
@@ -80,26 +74,21 @@ class SmartPlaylistNotifier extends Notifier<SmartPlaylistState> {
     );
   }
 
-  /// Update the configuration
   void updateConfig(SmartPlaylistConfig config) {
     state = state.copyWith(config: config);
   }
 
-  /// Get recently played track IDs for anti-repetition filtering
   Future<Set<String>> _getRecentlyPlayedIds() async {
     if (!state.config.antiRepetition) return {};
-
     try {
       final database = ref.read(databaseProvider);
       final cutoff = DateTime.now().subtract(
         Duration(days: state.config.antiRepetitionDays),
       );
-
       final history = await (database.select(database.historyTable)
             ..where((tbl) => tbl.type.equals(HistoryEntryType.track.name))
             ..where((tbl) => tbl.createdAt.isBiggerOrEqualValue(cutoff)))
           .get();
-
       return history.map((h) => h.itemId).toSet();
     } catch (e) {
       AppLogger.reportError(e, StackTrace.current);
@@ -107,70 +96,36 @@ class SmartPlaylistNotifier extends Notifier<SmartPlaylistState> {
     }
   }
 
-  /// Search tracks for a specific genre using the metadata plugin
   Future<List<SpotubeFullTrackObject>> _searchGenreTracks(
-    String genreId,
     String genreName, {
     int limit = 50,
   }) async {
     try {
-      final plugin = await ref.read(metadataPluginProvider.future);
-      if (plugin == null) return [];
-
-      // Strategy: search by genre keyword + filter by freshness
-      // The metadata plugin abstracts over Spotify/MusicBrainz/etc.
-      final searchQuery = _buildSearchQuery(genreName);
-
+      final plugin = await metadataPlugin;
       final result = await plugin.search.tracks(
-        searchQuery,
+        genreName,
         offset: 0,
         limit: limit,
       );
-
-      return result.items
-          .whereType<SpotubeFullTrackObject>()
-          .toList();
+      return result.items.whereType<SpotubeFullTrackObject>().toList();
     } catch (e) {
       AppLogger.reportError(e, StackTrace.current);
       return [];
     }
   }
 
-  /// Build optimized search query based on freshness mode
-  String _buildSearchQuery(String genreName) {
-    final config = state.config;
-    
-    return switch (config.freshnessMode) {
-      FreshnessMode.fresh => 'genre:$genreName year:${DateTime.now().year}',
-      FreshnessMode.classics => 'genre:$genreName',
-      FreshnessMode.mixed => 'genre:$genreName',
-      FreshnessMode.all => 'genre:$genreName',
-    };
-  }
-
-  /// Filter tracks based on configuration
   List<SpotubeFullTrackObject> _filterTracks(
     List<SpotubeFullTrackObject> tracks,
     Set<String> recentIds,
   ) {
     final config = state.config;
-    final now = DateTime.now();
-    final freshCutoff = now.subtract(
+    final freshCutoff = DateTime.now().subtract(
       Duration(days: config.freshnessDaysThreshold),
     );
 
     return tracks.where((track) {
-      // Anti-repetition filter
-      if (config.antiRepetition && recentIds.contains(track.id)) {
-        return false;
-      }
-
-      // Explicit content filter
-      if (!config.allowExplicit && track.explicit) {
-        return false;
-      }
-
-      // Freshness filter for "fresh" mode
+      if (config.antiRepetition && recentIds.contains(track.id)) return false;
+      if (!config.allowExplicit && track.explicit) return false;
       if (config.freshnessMode == FreshnessMode.fresh) {
         final releaseDate = DateTime.tryParse(
           track.album.releaseDate ?? '1970-01-01',
@@ -179,77 +134,41 @@ class SmartPlaylistNotifier extends Notifier<SmartPlaylistState> {
           return false;
         }
       }
-
       return true;
     }).toList();
   }
 
-  /// Select tracks to fill a target duration intelligently
   List<SpotubeFullTrackObject> _selectTracksForDuration(
     List<SpotubeFullTrackObject> available,
-    Duration targetDuration, {
-    FreshnessMode? freshnessOverride,
-  }) {
+    Duration targetDuration,
+  ) {
     if (available.isEmpty) return [];
-
-    final config = state.config;
-    final mode = freshnessOverride ?? config.freshnessMode;
     final random = Random();
+    final sorted = List.of(available)..shuffle(random);
 
-    // Sort strategy based on mode
-    List<SpotubeFullTrackObject> sorted;
-    switch (mode) {
-      case FreshnessMode.fresh:
-        // Sort by release date, newest first
-        sorted = List.of(available)
-          ..sort((a, b) {
-            final dateA =
-                DateTime.tryParse(a.album.releaseDate ?? '1970-01-01') ??
-                    DateTime(1970);
-            final dateB =
-                DateTime.tryParse(b.album.releaseDate ?? '1970-01-01') ??
-                    DateTime(1970);
-            return dateB.compareTo(dateA);
-          });
-        break;
-      case FreshnessMode.classics:
-        // Shuffle for variety among established tracks
-        sorted = List.of(available)..shuffle(random);
-        break;
-      case FreshnessMode.mixed:
-      case FreshnessMode.all:
-        // Shuffle for maximum variety
-        sorted = List.of(available)..shuffle(random);
-        break;
-    }
-
-    // Greedy fill: pick tracks until we reach the target duration
-    // Allow 10% overshoot for a natural ending
-    final maxDuration = targetDuration + Duration(
-      milliseconds: (targetDuration.inMilliseconds * 0.10).toInt(),
-    );
+    final maxDuration = targetDuration +
+        Duration(
+          milliseconds: (targetDuration.inMilliseconds * 0.10).toInt(),
+        );
     final selected = <SpotubeFullTrackObject>[];
     var currentDuration = Duration.zero;
 
     for (final track in sorted) {
       if (currentDuration >= targetDuration) break;
-      if (currentDuration + Duration(milliseconds: track.durationMs) > maxDuration) {
-        continue; // Skip if it would overshoot too much
+      if (currentDuration + Duration(milliseconds: track.durationMs) >
+          maxDuration) {
+        continue;
       }
-
       selected.add(track);
       currentDuration += Duration(milliseconds: track.durationMs);
     }
-
     return selected;
   }
 
-  /// Main generation method
   Future<void> generate() async {
     final config = state.config;
-
     if (config.genres.isEmpty) {
-      state = state.copyWith(error: 'Sélectionnez au moins un genre');
+      state = state.copyWith(error: 'Select at least one genre');
       return;
     }
 
@@ -257,19 +176,17 @@ class SmartPlaylistNotifier extends Notifier<SmartPlaylistState> {
       isGenerating: true,
       error: null,
       progress: 0.0,
-      progressMessage: 'Initialisation...',
+      progressMessage: 'Initializing...',
       generatedTracks: [],
     );
 
     try {
-      // Step 1: Get recently played IDs for anti-repetition
       state = state.copyWith(
         progress: 0.1,
-        progressMessage: 'Vérification de l\'historique...',
+        progressMessage: 'Checking history...',
       );
       final recentIds = await _getRecentlyPlayedIds();
 
-      // Step 2: For each genre, search and collect tracks
       final allTracks = <String, List<SpotubeFullTrackObject>>{};
       final totalGenres = config.genres.length;
 
@@ -277,31 +194,21 @@ class SmartPlaylistNotifier extends Notifier<SmartPlaylistState> {
         final genre = config.genres[i];
         state = state.copyWith(
           progress: 0.1 + (0.6 * (i / totalGenres)),
-          progressMessage: 'Recherche ${genre.name}...',
+          progressMessage: 'Searching ${genre.name}...',
         );
 
-        // Search with multiple queries for better coverage
         final tracks = <SpotubeFullTrackObject>[];
-
-        // Primary search
-        final primary = await _searchGenreTracks(
-          genre.id,
-          genre.name,
-          limit: 50,
-        );
+        final primary = await _searchGenreTracks(genre.name, limit: 50);
         tracks.addAll(primary);
 
-        // If in mixed mode, also search for new releases specifically
         if (config.freshnessMode == FreshnessMode.mixed) {
           final fresh = await _searchGenreTracks(
-            genre.id,
             '${genre.name} ${DateTime.now().year}',
             limit: 30,
           );
           tracks.addAll(fresh);
         }
 
-        // Deduplicate by track ID
         final seen = <String>{};
         final unique = tracks.where((t) {
           if (seen.contains(t.id)) return false;
@@ -312,70 +219,45 @@ class SmartPlaylistNotifier extends Notifier<SmartPlaylistState> {
         allTracks[genre.id] = _filterTracks(unique, recentIds);
       }
 
-      // Step 3: Select tracks per genre to match duration targets
       state = state.copyWith(
         progress: 0.8,
-        progressMessage: 'Construction de la playlist...',
+        progressMessage: 'Building playlist...',
       );
 
       final selectedTracks = <SpotubeFullTrackObject>[];
+      final genreCount = config.genres.length;
+      final perGenreDuration = Duration(
+        milliseconds: config.totalDuration.inMilliseconds ~/ genreCount,
+      );
 
       for (final genre in config.genres) {
         final available = allTracks[genre.id] ?? [];
-        final genreDuration = genre.targetDuration;
-
-        if (config.freshnessMode == FreshnessMode.mixed) {
-          // Split: X% new, rest classics
-          final freshDuration = Duration(
-            milliseconds:
-                (genreDuration.inMilliseconds * config.freshnessRatio).toInt(),
-          );
-          final classicDuration = genreDuration - freshDuration;
-
-          // Separate fresh and classic tracks
-          final freshCutoff = DateTime.now().subtract(
-            Duration(days: config.freshnessDaysThreshold),
-          );
-          final freshTracks = available.where((t) {
-            final rd = DateTime.tryParse(t.album.releaseDate ?? '1970-01-01');
-            return rd != null && rd.isAfter(freshCutoff);
-          }).toList();
-          final classicTracks = available.where((t) {
-            final rd = DateTime.tryParse(t.album.releaseDate ?? '1970-01-01');
-            return rd == null || rd.isBefore(freshCutoff);
-          }).toList();
-
-          selectedTracks.addAll(
-            _selectTracksForDuration(
-              freshTracks,
-              freshDuration,
-              freshnessOverride: FreshnessMode.fresh,
-            ),
-          );
-          selectedTracks.addAll(
-            _selectTracksForDuration(
-              classicTracks,
-              classicDuration,
-              freshnessOverride: FreshnessMode.classics,
-            ),
-          );
-        } else {
-          selectedTracks.addAll(
-            _selectTracksForDuration(available, genreDuration),
-          );
-        }
+        final genreDuration = genre.targetDuration.inMilliseconds > 0
+            ? genre.targetDuration
+            : perGenreDuration;
+        selectedTracks.addAll(
+          _selectTracksForDuration(available, genreDuration),
+        );
       }
 
-      // Step 4: Final shuffle within each genre block for variety,
-      // but keep genre groups together for a natural flow
-      // Actually, let's do a smart interleave if multiple genres
-      final finalPlaylist = config.genres.length > 1
-          ? _interleaveGenres(selectedTracks, config.genres)
-          : selectedTracks;
+      // Shuffle blocks for variety
+      if (config.genres.length > 1) {
+        final blockSize = 3;
+        final blocks = <List<SpotubeFullTrackObject>>[];
+        for (int i = 0; i < selectedTracks.length; i += blockSize) {
+          blocks.add(selectedTracks.sublist(
+            i,
+            min(i + blockSize, selectedTracks.length),
+          ));
+        }
+        blocks.shuffle(Random());
+        selectedTracks
+          ..clear()
+          ..addAll(blocks.expand((b) => b));
+      }
 
-      // Calculate actual duration
       final actualDuration = Duration(
-        milliseconds: finalPlaylist.fold<int>(
+        milliseconds: selectedTracks.fold<int>(
           0,
           (sum, track) => sum + track.durationMs,
         ),
@@ -383,74 +265,33 @@ class SmartPlaylistNotifier extends Notifier<SmartPlaylistState> {
 
       state = state.copyWith(
         isGenerating: false,
-        generatedTracks: finalPlaylist,
+        generatedTracks: selectedTracks,
         actualDuration: actualDuration,
         progress: 1.0,
-        progressMessage: 'Terminé !',
+        progressMessage: 'Done!',
       );
     } catch (e, stack) {
       AppLogger.reportError(e, stack);
       state = state.copyWith(
         isGenerating: false,
-        error: 'Erreur lors de la génération: $e',
+        error: 'Generation error: $e',
       );
     }
   }
 
-  /// Interleave tracks from different genres for a smooth multi-genre flow
-  List<SpotubeFullTrackObject> _interleaveGenres(
-    List<SpotubeFullTrackObject> tracks,
-    List<SmartPlaylistGenre> genres,
-  ) {
-    // For simplicity, just shuffle the whole list
-    // A more sophisticated approach would group by genre and
-    // alternate blocks of 2-3 tracks
-    final result = List.of(tracks);
-    final random = Random();
-    
-    // Fisher-Yates shuffle with genre-aware blocks
-    // Group tracks by their position in the genre list
-    if (genres.length <= 1) {
-      result.shuffle(random);
-      return result;
-    }
-
-    // Create blocks of 2-3 tracks and shuffle the blocks
-    final blockSize = 3;
-    final blocks = <List<SpotubeFullTrackObject>>[];
-    for (int i = 0; i < result.length; i += blockSize) {
-      blocks.add(
-        result.sublist(i, min(i + blockSize, result.length)),
-      );
-    }
-    blocks.shuffle(random);
-
-    return blocks.expand((block) => block).toList();
-  }
-
-  /// Load the generated playlist into the audio player
   Future<void> playGenerated() async {
     if (state.generatedTracks.isEmpty) return;
-
     final audioPlayer = ref.read(audioPlayerProvider.notifier);
-    await audioPlayer.load(
-      state.generatedTracks,
-      autoPlay: true,
-    );
+    await audioPlayer.load(state.generatedTracks, autoPlay: true);
   }
 
-  /// Add generated playlist to queue without replacing current playback
   Future<void> addToQueue() async {
     if (state.generatedTracks.isEmpty) return;
-
     final audioPlayer = ref.read(audioPlayerProvider.notifier);
     await audioPlayer.addTracks(state.generatedTracks);
   }
 
-  /// Regenerate with the same config (different shuffle/selection)
-  Future<void> regenerate() async {
-    await generate();
-  }
+  Future<void> regenerate() async => await generate();
 }
 
 final smartPlaylistProvider =
@@ -458,43 +299,34 @@ final smartPlaylistProvider =
   () => SmartPlaylistNotifier(),
 );
 
-/// Quick presets for common use cases
 class SmartPlaylistPresets {
   static SmartPlaylistConfig workout2h() => SmartPlaylistConfig(
         genres: [
           const SmartPlaylistGenre(
-            id: 'work-out',
-            name: 'Workout',
-            targetDuration: Duration(hours: 1),
-          ),
+              id: 'work-out',
+              name: 'Workout',
+              targetDuration: Duration(hours: 1)),
           const SmartPlaylistGenre(
-            id: 'edm',
-            name: 'EDM',
-            targetDuration: Duration(hours: 1),
-          ),
+              id: 'edm', name: 'EDM', targetDuration: Duration(hours: 1)),
         ],
         totalDuration: const Duration(hours: 2),
         freshnessMode: FreshnessMode.mixed,
-        freshnessRatio: 0.6,
       );
 
   static SmartPlaylistConfig chillEvening() => SmartPlaylistConfig(
         genres: [
           const SmartPlaylistGenre(
-            id: 'chill',
-            name: 'Chill',
-            targetDuration: Duration(hours: 1),
-          ),
+              id: 'chill',
+              name: 'Chill',
+              targetDuration: Duration(hours: 1)),
           const SmartPlaylistGenre(
-            id: 'lo-fi',
-            name: 'Lo-Fi',
-            targetDuration: Duration(minutes: 30),
-          ),
+              id: 'lo-fi',
+              name: 'Lo-Fi',
+              targetDuration: Duration(minutes: 30)),
           const SmartPlaylistGenre(
-            id: 'jazz',
-            name: 'Jazz',
-            targetDuration: Duration(minutes: 30),
-          ),
+              id: 'jazz',
+              name: 'Jazz',
+              targetDuration: Duration(minutes: 30)),
         ],
         totalDuration: const Duration(hours: 2),
         freshnessMode: FreshnessMode.all,
@@ -503,113 +335,48 @@ class SmartPlaylistPresets {
   static SmartPlaylistConfig newReleases() => SmartPlaylistConfig(
         genres: [
           const SmartPlaylistGenre(
-            id: 'pop',
-            name: 'Pop',
-            targetDuration: Duration(hours: 1),
-          ),
+              id: 'pop', name: 'Pop', targetDuration: Duration(hours: 1)),
           const SmartPlaylistGenre(
-            id: 'hip-hop',
-            name: 'Hip-Hop',
-            targetDuration: Duration(hours: 1),
-          ),
+              id: 'hip-hop',
+              name: 'Hip-Hop',
+              targetDuration: Duration(hours: 1)),
         ],
         totalDuration: const Duration(hours: 2),
         freshnessMode: FreshnessMode.fresh,
-        freshnessDaysThreshold: 14,
       );
 
   static SmartPlaylistConfig roadTrip() => SmartPlaylistConfig(
         genres: [
           const SmartPlaylistGenre(
-            id: 'rock',
-            name: 'Rock',
-            targetDuration: Duration(hours: 1),
-          ),
+              id: 'rock', name: 'Rock', targetDuration: Duration(hours: 1)),
           const SmartPlaylistGenre(
-            id: 'indie',
-            name: 'Indie',
-            targetDuration: Duration(hours: 1),
-          ),
+              id: 'indie',
+              name: 'Indie',
+              targetDuration: Duration(hours: 1)),
           const SmartPlaylistGenre(
-            id: 'pop',
-            name: 'Pop',
-            targetDuration: Duration(hours: 1),
-          ),
+              id: 'pop', name: 'Pop', targetDuration: Duration(hours: 1)),
         ],
         totalDuration: const Duration(hours: 3),
         freshnessMode: FreshnessMode.mixed,
-        freshnessRatio: 0.3,
-      );
-
-  static SmartPlaylistConfig deepFocus() => SmartPlaylistConfig(
-        genres: [
-          const SmartPlaylistGenre(
-            id: 'ambient',
-            name: 'Ambient',
-            targetDuration: Duration(hours: 1),
-          ),
-          const SmartPlaylistGenre(
-            id: 'classical',
-            name: 'Classical',
-            targetDuration: Duration(hours: 1),
-          ),
-          const SmartPlaylistGenre(
-            id: 'piano',
-            name: 'Piano',
-            targetDuration: Duration(minutes: 30),
-          ),
-        ],
-        totalDuration: const Duration(hours: 2, minutes: 30),
-        freshnessMode: FreshnessMode.all,
-        allowExplicit: false,
       );
 
   static SmartPlaylistConfig frenchVibes() => SmartPlaylistConfig(
         genres: [
           const SmartPlaylistGenre(
-            id: 'french',
-            name: 'French',
-            targetDuration: Duration(hours: 2),
-          ),
+              id: 'french',
+              name: 'French',
+              targetDuration: Duration(hours: 2)),
         ],
         totalDuration: const Duration(hours: 2),
         freshnessMode: FreshnessMode.mixed,
-        freshnessRatio: 0.5,
-        market: 'FR',
       );
 
   static List<({String name, String emoji, SmartPlaylistConfig config})>
       get all => [
-            (
-              name: 'Workout 2h',
-              emoji: '💪',
-              config: workout2h(),
-            ),
-            (
-              name: 'Soirée Chill',
-              emoji: '🌙',
-              config: chillEvening(),
-            ),
-            (
-              name: 'Nouveautés',
-              emoji: '🆕',
-              config: newReleases(),
-            ),
-            (
-              name: 'Road Trip 3h',
-              emoji: '🚗',
-              config: roadTrip(),
-            ),
-            (
-              name: 'Focus Profond',
-              emoji: '🧠',
-              config: deepFocus(),
-            ),
-            (
-              name: 'French Vibes',
-              emoji: '🇫🇷',
-              config: frenchVibes(),
-            ),
+            (name: 'Workout 2h', emoji: '💪', config: workout2h()),
+            (name: 'Chill', emoji: '🌙', config: chillEvening()),
+            (name: 'New', emoji: '🆕', config: newReleases()),
+            (name: 'Road Trip', emoji: '🚗', config: roadTrip()),
+            (name: 'French', emoji: '🇫🇷', config: frenchVibes()),
           ];
 }
-
