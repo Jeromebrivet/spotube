@@ -42,12 +42,19 @@ List<SideBarTiles> getSidebarTileList(AppLocalizations l10n) => [
         icon: SpotubeIcons.music,
         title: l10n.lyrics,
       ),
-      SideBarTiles(
+     SideBarTiles(
         id: "stats",
         pathPrefix: "/stats",
         route: const StatsRoute(),
         icon: SpotubeIcons.chart,
         title: l10n.stats,
+      ),
+      SideBarTiles(
+        id: "smart_playlist",
+        pathPrefix: "/smart-playlist",
+        route: const SmartPlaylistRoute(),
+        icon: SpotubeIcons.playlist,
+        title: "Smart Mix",
       ),
     ];
 
