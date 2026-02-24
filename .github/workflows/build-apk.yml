@@ -1,19 +1,17 @@
 name: Build Smart Playlist APK
 
 on:
-  workflow_dispatch:
   push:
-    branches: [ master ]
+    branches: [master]
+  workflow_dispatch:
 
 env:
-  FLUTTER_VERSION: 3.35.2
+  FLUTTER_VERSION: "3.35.2"
   FLUTTER_CHANNEL: master
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -21,16 +19,14 @@ jobs:
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
-          java-version: '17'
+          distribution: zulu
+          java-version: "17"
 
       - name: Setup Flutter
-        uses: subosito/flutter-action@v2.18.0
+        uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: ${{ env.FLUTTER_CHANNEL }}
-          cache: true
-          git-source: https://github.com/flutter/flutter.git
 
       - name: Install dependencies
         run: flutter pub get
@@ -38,7 +34,7 @@ jobs:
       - name: Generate code
         run: dart run build_runner build --delete-conflicting-outputs
 
-       - name: Create dummy keystore
+      - name: Create dummy keystore
         run: |
           keytool -genkey -v -keystore ${{ github.workspace }}/android/app/upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload -storepass android -keypass android -dname "CN=Debug, OU=Debug, O=Debug, L=Debug, S=Debug, C=US"
           echo "ANDROID_KEYSTORE_FILE=${{ github.workspace }}/android/app/upload-keystore.jks" >> $GITHUB_ENV
@@ -52,6 +48,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: spotube-smart-playlist-apk
+          name: spotube-smart-playlist
           path: build/app/outputs/flutter-apk/app-release.apk
-          retention-days: 30
