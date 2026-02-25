@@ -45,13 +45,11 @@ jobs:
           ANDROID_KEY_ALIAS: upload
           ANDROID_KEY_PASSWORD: android
 
-      - name: Build APK
-        run: flutter build apk --release
-        env:
-          ANDROID_KEYSTORE_FILE: ${{ github.workspace }}/android/app/upload-keystore.jks
-          ANDROID_KEYSTORE_PASSWORD: android
-          ANDROID_KEY_ALIAS: upload
-          ANDROID_KEY_PASSWORD: android
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: spotube-smart-playlist
+          path: build/app/outputs/flutter-apk/app-dev-release.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
