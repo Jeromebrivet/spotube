@@ -39,20 +39,16 @@ jobs:
           KEYSTORE_PATH="${{ github.workspace }}/android/app/upload-keystore.jks"
           keytool -genkey -v -keystore "$KEYSTORE_PATH" -keyalg RSA -keysize 2048 -validity 10000 -alias upload -storepass android -keypass android -dname "CN=Debug, OU=Debug, O=Debug, L=Debug, S=Debug, C=US"
           printf 'storePassword=android\nkeyPassword=android\nkeyAlias=upload\nstoreFile=%s\n' "$KEYSTORE_PATH" > ${{ github.workspace }}/android/key.properties
-        env:
-          ANDROID_KEYSTORE_FILE: ${{ github.workspace }}/android/app/upload-keystore.jks
-          ANDROID_KEYSTORE_PASSWORD: android
-          ANDROID_KEY_ALIAS: upload
-          ANDROID_KEY_PASSWORD: android
+
+      - name: Build APK
+        run: flutter build apk --release --flavor dev
+
+      - name: Find APK
+        run: find build -name "*.apk" -type f 2>/dev/null || echo "No APK found"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: spotube-smart-playlist
-          path: build/app/outputs/flutter-apk/app-dev-release.apk
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: spotube-smart-playlist
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/
+          if-no-files-found: warn
